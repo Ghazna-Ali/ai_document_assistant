@@ -325,7 +325,7 @@ def load_drive_files(drive_link):
                 url=drive_link.strip(),
                 output=str(single_path),
                 quiet=True,
-                fuzzy=True,
+                ##fuzzy=True,
             )
             result = [downloaded] if downloaded else []
 
