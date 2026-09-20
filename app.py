@@ -1,4 +1,3 @@
-
 import hashlib
 import io
 import re
@@ -7,7 +6,6 @@ from pathlib import Path
 
 import faiss
 import gdown
-import numpy as np
 import streamlit as st
 from docx import Document
 from groq import Groq
@@ -43,60 +41,24 @@ SUPPORTED_EXTENSIONS = {
 }
 
 STOP_WORDS = {
-    "the",
-    "a",
-    "an",
-    "is",
-    "are",
-    "was",
-    "were",
-    "of",
-    "to",
-    "in",
-    "on",
-    "for",
-    "and",
-    "or",
-    "with",
-    "from",
-    "what",
-    "who",
-    "when",
-    "where",
-    "why",
-    "how",
-    "does",
-    "do",
-    "did",
-    "this",
-    "that",
-    "it",
-    "about",
-    "tell",
-    "me",
-    "please",
+    "the", "a", "an", "is", "are", "was", "were", "of", "to",
+    "in", "on", "for", "and", "or", "with", "from", "what",
+    "who", "when", "where", "why", "how", "does", "do", "did",
+    "this", "that", "it", "about", "tell", "me", "please",
 }
 
 
 # ============================================================
-# CACHED MODELS / CLIENTS
+# CACHED MODELS / CLIENT
 # ============================================================
 
 @st.cache_resource
 def load_embedding_model():
-    """
-    Load the Sentence Transformer model once.
-    """
-    return SentenceTransformer(
-        "all-MiniLM-L6-v2"
-    )
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
 
 @st.cache_resource
 def get_groq_client(api_key):
-    """
-    Create the Groq client once for the current API key.
-    """
     return Groq(api_key=api_key)
 
 
@@ -105,138 +67,78 @@ def get_groq_client(api_key):
 # ============================================================
 
 def extract_pdf(file_bytes, filename):
-    """
-    Extract PDF text page by page.
-
-    Page numbers are preserved because PDFs have
-    explicit page boundaries.
-    """
-
     pages = []
 
-    reader = PdfReader(
-        io.BytesIO(file_bytes)
-    )
+    reader = PdfReader(io.BytesIO(file_bytes))
 
-    for page_number, page in enumerate(
-        reader.pages,
-        start=1,
-    ):
+    for page_number, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
 
-        pages.append(
-            {
-                "text": text,
-                "filename": filename,
-                "page": page_number,
-            }
-        )
+        pages.append({
+            "text": text,
+            "filename": filename,
+            "page": page_number,
+        })
 
     return pages
 
 
 def extract_docx(file_bytes, filename):
-    """
-    Extract text from a DOCX file.
+    document = Document(io.BytesIO(file_bytes))
 
-    DOCX page numbers are not reliably available from
-    python-docx, so page is stored as None.
-    """
-
-    document = Document(
-        io.BytesIO(file_bytes)
+    text = "\n".join(
+        paragraph.text
+        for paragraph in document.paragraphs
+        if paragraph.text.strip()
     )
 
-    paragraphs = []
-
-    for paragraph in document.paragraphs:
-        if paragraph.text.strip():
-            paragraphs.append(
-                paragraph.text
-            )
-
-    text = "\n".join(paragraphs)
-
-    return [
-        {
-            "text": text,
-            "filename": filename,
-            "page": None,
-        }
-    ]
+    return [{
+        "text": text,
+        "filename": filename,
+        "page": None,
+    }]
 
 
 def extract_txt(file_bytes, filename):
-    """
-    Extract a TXT document.
-    """
-
     text = file_bytes.decode(
         "utf-8",
         errors="replace",
     )
 
-    return [
-        {
-            "text": text,
-            "filename": filename,
-            "page": None,
-        }
-    ]
+    return [{
+        "text": text,
+        "filename": filename,
+        "page": None,
+    }]
 
 
 def extract_md(file_bytes, filename):
-    """
-    Extract a Markdown document.
-    """
-
     text = file_bytes.decode(
         "utf-8",
         errors="replace",
     )
 
-    return [
-        {
-            "text": text,
-            "filename": filename,
-            "page": None,
-        }
-    ]
+    return [{
+        "text": text,
+        "filename": filename,
+        "page": None,
+    }]
 
 
 def extract_document(file_bytes, filename):
-    """
-    Select the correct extraction function based
-    on the file extension.
-    """
-
-    extension = Path(
-        filename
-    ).suffix.lower()
+    extension = Path(filename).suffix.lower()
 
     if extension == ".pdf":
-        return extract_pdf(
-            file_bytes,
-            filename,
-        )
+        return extract_pdf(file_bytes, filename)
 
     if extension == ".docx":
-        return extract_docx(
-            file_bytes,
-            filename,
-        )
+        return extract_docx(file_bytes, filename)
 
     if extension == ".txt":
-        return extract_txt(
-            file_bytes,
-            filename,
-        )
+        return extract_txt(file_bytes, filename)
 
     if extension == ".md":
-        return extract_md(
-            file_bytes,
-            filename,
-        )
+        return extract_md(file_bytes, filename)
 
     raise ValueError(
         f"Unsupported file type: {extension}"
@@ -252,20 +154,14 @@ def chunk_text(
     chunk_size=900,
     overlap=150,
 ):
-    """
-    Split extracted text into overlapping chunks.
-
-    Every chunk keeps:
-
-    - text
-    - filename
-    - page
-    """
-
     chunks = []
 
-    for record in page_records:
+    if overlap >= chunk_size:
+        raise ValueError(
+            "Chunk overlap must be smaller than chunk size."
+        )
 
+    for record in page_records:
         text = re.sub(
             r"\s+",
             " ",
@@ -278,32 +174,24 @@ def chunk_text(
         start = 0
 
         while start < len(text):
-
             end = min(
                 start + chunk_size,
                 len(text),
             )
 
-            chunk = text[
-                start:end
-            ].strip()
+            chunk = text[start:end].strip()
 
             if chunk:
-                chunks.append(
-                    {
-                        "text": chunk,
-                        "filename": record["filename"],
-                        "page": record["page"],
-                    }
-                )
+                chunks.append({
+                    "text": chunk,
+                    "filename": record["filename"],
+                    "page": record["page"],
+                })
 
             if end >= len(text):
                 break
 
-            start = max(
-                0,
-                end - overlap,
-            )
+            start = end - overlap
 
     return chunks
 
@@ -312,14 +200,7 @@ def chunk_text(
 # EMBEDDINGS
 # ============================================================
 
-def build_embeddings(
-    chunks,
-    model,
-):
-    """
-    Create embeddings for all chunks.
-    """
-
+def build_embeddings(chunks, model):
     texts = [
         chunk["text"]
         for chunk in chunks
@@ -332,31 +213,18 @@ def build_embeddings(
         show_progress_bar=False,
     )
 
-    return embeddings.astype(
-        "float32"
-    )
+    return embeddings.astype("float32")
 
 
 # ============================================================
 # FAISS
 # ============================================================
 
-def build_faiss_index(
-    embeddings,
-):
-    """
-    Create a FAISS similarity index.
-    """
-
+def build_faiss_index(embeddings):
     dimension = embeddings.shape[1]
 
-    index = faiss.IndexFlatIP(
-        dimension
-    )
-
-    index.add(
-        embeddings
-    )
+    index = faiss.IndexFlatIP(dimension)
+    index.add(embeddings)
 
     return index
 
@@ -366,10 +234,6 @@ def build_faiss_index(
 # ============================================================
 
 def important_words(question):
-    """
-    Extract meaningful words from the question.
-    """
-
     words = re.findall(
         r"\b[a-zA-Z0-9]+\b",
         question.lower(),
@@ -378,58 +242,29 @@ def important_words(question):
     return [
         word
         for word in words
-        if (
-            word not in STOP_WORDS
-            and len(word) > 2
-        )
+        if word not in STOP_WORDS and len(word) > 2
     ]
 
 
-def keyword_search(
-    question,
-    chunks,
-):
-    """
-    Simple keyword matching.
-
-    Score = number of question keywords
-    found in the chunk / number of keywords.
-    """
-
-    words = important_words(
-        question
-    )
+def keyword_search(question, chunks):
+    words = important_words(question)
 
     results = []
 
-    for index, chunk in enumerate(
-        chunks
-    ):
-
-        text = chunk[
-            "text"
-        ].lower()
+    for index, chunk in enumerate(chunks):
+        text = chunk["text"].lower()
 
         if not words:
             score = 0.0
-
         else:
             matches = sum(
                 1
                 for word in words
                 if word in text
             )
+            score = matches / len(words)
 
-            score = (
-                matches / len(words)
-            )
-
-        results.append(
-            (
-                index,
-                score,
-            )
-        )
+        results.append((index, score))
 
     results.sort(
         key=lambda item: item[1],
@@ -450,31 +285,20 @@ def hybrid_search(
     model,
     top_k=5,
 ):
-    """
-    Combine:
-
-    75% semantic similarity
-    25% keyword matching
-    """
-
     query_embedding = model.encode(
         [question],
         convert_to_numpy=True,
         normalize_embeddings=True,
-    ).astype(
-        "float32"
-    )
+    ).astype("float32")
 
     search_count = min(
         len(chunks),
         max(top_k * 3, 10),
     )
 
-    semantic_scores, semantic_indices = (
-        index.search(
-            query_embedding,
-            search_count,
-        )
+    semantic_scores, semantic_indices = index.search(
+        query_embedding,
+        search_count,
     )
 
     semantic = {}
@@ -483,19 +307,11 @@ def hybrid_search(
         semantic_scores[0],
         semantic_indices[0],
     ):
-
         if chunk_index >= 0:
-            semantic[
-                int(chunk_index)
-            ] = float(score)
-
-    keyword_results = keyword_search(
-        question,
-        chunks,
-    )
+            semantic[int(chunk_index)] = float(score)
 
     keyword = dict(
-        keyword_results
+        keyword_search(question, chunks)
     )
 
     keyword_candidates = {
@@ -504,20 +320,14 @@ def hybrid_search(
             keyword.items(),
             key=lambda item: item[1],
             reverse=True,
-        )[
-            : max(top_k * 3, 10)
-        ]
+        )[:max(top_k * 3, 10)]
     }
 
-    candidates = (
-        set(semantic)
-        | keyword_candidates
-    )
+    candidates = set(semantic) | keyword_candidates
 
     ranked = []
 
     for chunk_index in candidates:
-
         semantic_score = semantic.get(
             chunk_index,
             0.0,
@@ -533,17 +343,13 @@ def hybrid_search(
             + 0.25 * keyword_score
         )
 
-        ranked.append(
-            {
-                "index": chunk_index,
-                "score": hybrid_score,
-                "semantic_score": semantic_score,
-                "keyword_score": keyword_score,
-                "chunk": chunks[
-                    chunk_index
-                ],
-            }
-        )
+        ranked.append({
+            "index": chunk_index,
+            "score": hybrid_score,
+            "semantic_score": semantic_score,
+            "keyword_score": keyword_score,
+            "chunk": chunks[chunk_index],
+        })
 
     ranked.sort(
         key=lambda item: item["score"],
@@ -554,7 +360,7 @@ def hybrid_search(
 
 
 # ============================================================
-# GROQ
+# GROQ ANSWER GENERATION
 # ============================================================
 
 def answer_question(
@@ -563,55 +369,41 @@ def answer_question(
     client,
     model_name,
 ):
-    """
-    Send the question and retrieved chunks
-    to Groq.
-
-    The model is instructed to use ONLY the
-    provided context.
-    """
-
     context_parts = []
 
     for number, result in enumerate(
         retrieved_chunks,
         start=1,
     ):
-
         chunk = result["chunk"]
 
-        if chunk["page"]:
+        if chunk["page"] is not None:
             location = (
                 f"{chunk['filename']}, "
                 f"page {chunk['page']}"
             )
-
         else:
-            location = chunk[
-                "filename"
-            ]
+            location = chunk["filename"]
 
         context_parts.append(
             f"[Source {number}: {location}]\n"
             f"{chunk['text']}"
         )
 
-    context = "\n\n".join(
-        context_parts
-    )
+    context = "\n\n".join(context_parts)
 
     system_prompt = """
 You are a document question-answering assistant.
 
-Answer the user's question ONLY using the
-provided document context.
+Answer the user's question ONLY using the provided
+document context.
 
 Do not use outside knowledge.
 
 Do not invent or assume information.
 
-If the answer cannot be found in the provided
-context, say exactly:
+If the answer cannot be found in the provided context,
+say exactly:
 
 "I couldn't find that information in the provided documents."
 
@@ -644,59 +436,31 @@ QUESTION:
         temperature=0,
     )
 
-    return response.choices[
-        0
-    ].message.content
+    return response.choices[0].message.content
 
 
 # ============================================================
 # FILE SIGNATURE
 # ============================================================
 
-def file_signature(
-    filename,
-    file_bytes,
-):
-    """
-    Create a unique signature for a document.
+def file_signature(filename, file_bytes):
+    digest = hashlib.sha256(file_bytes).hexdigest()
 
-    If the same file is uploaded again,
-    it does not need to be processed again.
-    """
-
-    digest = hashlib.sha256(
-        file_bytes
-    ).hexdigest()
-
-    return (
-        f"{filename}:{digest}"
-    )
+    return f"{filename}:{digest}"
 
 
 # ============================================================
 # LOCAL FILE LOADING
 # ============================================================
 
-def load_local_files(
-    uploaded_files,
-):
-    """
-    Convert Streamlit uploaded files
-    into (filename, bytes) pairs.
-    """
-
+def load_local_files(uploaded_files):
     loaded = []
 
     for uploaded_file in uploaded_files:
-
-        file_bytes = (
-            uploaded_file.getvalue()
-        )
-
         loaded.append(
             (
                 uploaded_file.name,
-                file_bytes,
+                uploaded_file.getvalue(),
             )
         )
 
@@ -704,17 +468,14 @@ def load_local_files(
 
 
 # ============================================================
-# GOOGLE DRIVE
+# GOOGLE DRIVE URL HELPERS
 # ============================================================
 
-def get_drive_folder_id(
-    drive_link,
-):
+def get_drive_folder_id(drive_link):
     """
     Extract a Google Drive folder ID.
 
-    Expected format:
-
+    Example:
     https://drive.google.com/drive/folders/FOLDER_ID
     """
 
@@ -729,16 +490,13 @@ def get_drive_folder_id(
     return None
 
 
-def get_drive_file_id(
-    drive_link,
-):
+def get_drive_file_id(drive_link):
     """
-    Extract a Google Drive file ID from
-    common Google Drive URL formats.
+    Extract a Google Drive file ID from common URL formats.
     """
 
     # Example:
-    # /file/d/FILE_ID/view
+    # https://drive.google.com/file/d/FILE_ID/view
     match = re.search(
         r"/file/d/([a-zA-Z0-9_-]+)",
         drive_link,
@@ -748,7 +506,8 @@ def get_drive_file_id(
         return match.group(1)
 
     # Example:
-    # ?id=FILE_ID
+    # https://drive.google.com/open?id=FILE_ID
+    # https://drive.google.com/uc?id=FILE_ID
     match = re.search(
         r"[?&]id=([a-zA-Z0-9_-]+)",
         drive_link,
@@ -760,19 +519,17 @@ def get_drive_file_id(
     return None
 
 
-def load_drive_files(
-    drive_link,
-):
+# ============================================================
+# GOOGLE DRIVE LOADING
+# ============================================================
+
+def load_drive_files(drive_link):
     """
-    Download supported files from a public
-    Google Drive folder or single file.
+    Download supported files from a public Google Drive
+    folder or single file.
 
     Supported:
-
-    PDF
-    DOCX
-    TXT
-    MD
+    PDF, DOCX, TXT, MD
     """
 
     drive_link = drive_link.strip()
@@ -786,13 +543,8 @@ def load_drive_files(
         )
     )
 
-    folder_id = get_drive_folder_id(
-        drive_link
-    )
-
-    file_id = get_drive_file_id(
-        drive_link
-    )
+    folder_id = get_drive_folder_id(drive_link)
+    file_id = get_drive_file_id(drive_link)
 
     try:
 
@@ -808,20 +560,33 @@ def load_drive_files(
             )
 
             st.info(
-                "Downloading files from Google Drive folder..."
+                f"Google Drive folder detected: {folder_id}"
             )
 
-            downloaded_files = (
-                gdown.download_folder(
+            try:
+                downloaded_files = gdown.download_folder(
                     url=folder_url,
                     output=str(temp_dir),
-                    quiet=True,
+                    quiet=False,
+                    use_cookies=False,
+                    remaining_ok=True,
+                )
+            except TypeError:
+                # Compatibility with older gdown versions
+                downloaded_files = gdown.download_folder(
+                    url=folder_url,
+                    output=str(temp_dir),
+                    quiet=False,
                     use_cookies=False,
                 )
-            )
 
-            if downloaded_files is None:
-                downloaded_files = []
+            if not downloaded_files:
+                raise ValueError(
+                    "Google Drive returned no downloadable files. "
+                    "Make sure the folder is shared as "
+                    "'Anyone with the link → Viewer' and contains "
+                    "supported files."
+                )
 
         # ----------------------------------------------------
         # GOOGLE DRIVE SINGLE FILE
@@ -830,19 +595,16 @@ def load_drive_files(
         elif file_id:
 
             st.info(
-                "Downloading Google Drive file..."
+                f"Google Drive file detected: {file_id}"
             )
 
-            output_file = (
-                temp_dir
-                / "drive_file"
-            )
+            output_file = temp_dir / "drive_file"
 
             downloaded_file = gdown.download(
                 url=drive_link,
                 output=str(output_file),
-                quiet=True,
-                #fuzzy=True,
+                quiet=False,
+                fuzzy=True,
             )
 
             if not downloaded_file:
@@ -853,52 +615,95 @@ def load_drive_files(
         else:
 
             raise ValueError(
-                "Invalid Google Drive link. "
-                "Use a folder link such as "
-                "https://drive.google.com/drive/folders/FOLDER_ID "
-                "or a file link such as "
+                "Invalid Google Drive URL.\n\n"
+                "Folder example:\n"
+                "https://drive.google.com/drive/folders/FOLDER_ID\n\n"
+                "File example:\n"
                 "https://drive.google.com/file/d/FILE_ID/view"
             )
 
         # ----------------------------------------------------
-        # FIND SUPPORTED FILES
+        # FIND ALL DOWNLOADED FILES
         # ----------------------------------------------------
 
-        files = []
+        all_files = [
+            path
+            for path in temp_dir.rglob("*")
+            if path.is_file()
+        ]
 
-        for path in temp_dir.rglob("*"):
+        st.write(
+            f"Google Drive downloaded "
+            f"{len(all_files)} file(s)."
+        )
 
-            if not path.is_file():
-                continue
+        # Show everything downloaded so problems are visible.
+        if all_files:
 
-            extension = (
-                path.suffix.lower()
-            )
+            with st.expander(
+                "🔍 Google Drive downloaded files"
+            ):
 
-            if extension not in SUPPORTED_EXTENSIONS:
-                continue
+                for path in all_files:
+                    st.write(
+                        f"- {path.name}"
+                    )
 
-            files.append(
-                (
-                    path.name,
-                    path.read_bytes(),
+        # ----------------------------------------------------
+        # FILTER SUPPORTED FILES
+        # ----------------------------------------------------
+
+        supported_files = []
+
+        for path in all_files:
+
+            extension = path.suffix.lower()
+
+            if extension in SUPPORTED_EXTENSIONS:
+
+                supported_files.append(
+                    (
+                        path.name,
+                        path.read_bytes(),
+                    )
                 )
-            )
 
-        if not files:
+        # ----------------------------------------------------
+        # NO SUPPORTED FILES
+        # ----------------------------------------------------
+
+        if not supported_files:
+
+            if all_files:
+                detected = "\n".join(
+                    f"- {path.name}"
+                    for path in all_files
+                )
+            else:
+                detected = "No files were downloaded."
 
             raise ValueError(
-                "No supported PDF, DOCX, TXT or MD files "
-                "were found in the Google Drive location."
+                "Google Drive was accessed, but no supported "
+                "PDF, DOCX, TXT or MD files were found.\n\n"
+                "Files detected:\n"
+                f"{detected}\n\n"
+                "Supported extensions are:\n"
+                ".pdf\n"
+                ".docx\n"
+                ".txt\n"
+                ".md"
             )
 
-        return files
+        return supported_files
+
+    except Exception as error:
+
+        raise ValueError(
+            f"Could not load Google Drive content: {error}"
+        )
 
     finally:
-
-        # The temporary directory can remain during
-        # the Streamlit session. It is not part of the
-        # document processing state.
+        # Temporary files are used only during this processing run.
         pass
 
 
@@ -907,22 +712,15 @@ def load_drive_files(
 # ============================================================
 
 if "documents" not in st.session_state:
-
     st.session_state.documents = {}
 
-
 if "chunks" not in st.session_state:
-
     st.session_state.chunks = []
 
-
 if "embeddings" not in st.session_state:
-
     st.session_state.embeddings = None
 
-
 if "faiss_index" not in st.session_state:
-
     st.session_state.faiss_index = None
 
 
@@ -964,16 +762,11 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button(
-        "🗑️ Clear processed documents"
-    ):
+    if st.button("🗑️ Clear processed documents"):
 
         st.session_state.documents = {}
-
         st.session_state.chunks = []
-
         st.session_state.embeddings = None
-
         st.session_state.faiss_index = None
 
         st.rerun()
@@ -983,9 +776,7 @@ with st.sidebar:
 # ADD DOCUMENTS
 # ============================================================
 
-st.subheader(
-    "1. Add documents"
-)
+st.subheader("1. Add documents")
 
 uploaded_files = st.file_uploader(
     "Upload PDF, DOCX, TXT or MD files",
@@ -1017,30 +808,18 @@ if st.button(
 
     source_files = []
 
-    # --------------------------------------------------------
-    # LOCAL FILES
-    # --------------------------------------------------------
-
+    # Local uploads
     if uploaded_files:
-
         source_files.extend(
-            load_local_files(
-                uploaded_files
-            )
+            load_local_files(uploaded_files)
         )
 
-    # --------------------------------------------------------
-    # GOOGLE DRIVE
-    # --------------------------------------------------------
-
+    # Google Drive
     if drive_link.strip():
 
         try:
-
-            drive_files = (
-                load_drive_files(
-                    drive_link
-                )
+            drive_files = load_drive_files(
+                drive_link
             )
 
             source_files.extend(
@@ -1052,10 +831,6 @@ if st.button(
             st.error(
                 f"Google Drive loading failed: {error}"
             )
-
-    # --------------------------------------------------------
-    # CHECK FILES
-    # --------------------------------------------------------
 
     if not source_files:
 
@@ -1069,18 +844,9 @@ if st.button(
         model = load_embedding_model()
 
         new_documents = 0
+        progress = st.progress(0)
 
-        progress = st.progress(
-            0
-        )
-
-        total_files = len(
-            source_files
-        )
-
-        # ----------------------------------------------------
-        # PROCESS EACH DOCUMENT
-        # ----------------------------------------------------
+        total_files = len(source_files)
 
         for position, (
             filename,
@@ -1095,14 +861,8 @@ if st.button(
                 file_bytes,
             )
 
-            # ------------------------------------------------
-            # SKIP DUPLICATES
-            # ------------------------------------------------
-
-            if (
-                signature
-                in st.session_state.documents
-            ):
+            # Avoid processing the same file again.
+            if signature in st.session_state.documents:
 
                 progress.progress(
                     position / total_files
@@ -1112,24 +872,22 @@ if st.button(
 
             try:
 
-                # --------------------------------------------
-                # EXTRACTION
-                # --------------------------------------------
-
                 pages = extract_document(
                     file_bytes,
                     filename,
                 )
-
-                # --------------------------------------------
-                # CHUNKING
-                # --------------------------------------------
 
                 chunks = chunk_text(
                     pages,
                     chunk_size=chunk_size,
                     overlap=overlap,
                 )
+
+                if not chunks:
+                    st.warning(
+                        f"No text could be extracted "
+                        f"from {filename}."
+                    )
 
                 st.session_state.documents[
                     signature
@@ -1152,10 +910,8 @@ if st.button(
                 position / total_files
             )
 
-        # ----------------------------------------------------
-        # BUILD SEARCH INDEX
-        # ----------------------------------------------------
-
+        # Rebuild the searchable collection only
+        # when a new document was added.
         if new_documents:
 
             all_chunks = []
@@ -1163,7 +919,6 @@ if st.button(
             for document in (
                 st.session_state.documents.values()
             ):
-
                 all_chunks.extend(
                     document["chunks"]
                 )
@@ -1174,34 +929,21 @@ if st.button(
                     "Creating embeddings and FAISS index..."
                 ):
 
-                    embeddings = (
-                        build_embeddings(
-                            all_chunks,
-                            model,
-                        )
+                    embeddings = build_embeddings(
+                        all_chunks,
+                        model,
                     )
 
-                    faiss_index = (
-                        build_faiss_index(
-                            embeddings
-                        )
+                    faiss_index = build_faiss_index(
+                        embeddings
                     )
 
-                st.session_state.chunks = (
-                    all_chunks
-                )
-
-                st.session_state.embeddings = (
-                    embeddings
-                )
-
-                st.session_state.faiss_index = (
-                    faiss_index
-                )
+                st.session_state.chunks = all_chunks
+                st.session_state.embeddings = embeddings
+                st.session_state.faiss_index = faiss_index
 
         st.success(
-            f"Processed {new_documents} new "
-            f"document(s). "
+            f"Processed {new_documents} new document(s). "
             f"Total chunks: "
             f"{len(st.session_state.chunks)}"
         )
@@ -1213,37 +955,23 @@ if st.button(
 
 if st.session_state.documents:
 
-    st.subheader(
-        "2. Document information"
-    )
+    st.subheader("2. Document information")
 
     for document in (
         st.session_state.documents.values()
     ):
 
-        filename = document[
-            "filename"
-        ]
-
-        chunks = document[
-            "chunks"
-        ]
+        filename = document["filename"]
+        chunks = document["chunks"]
 
         with st.expander(
-            f"📄 {filename} — "
-            f"{len(chunks)} chunks"
+            f"📄 {filename} — {len(chunks)} chunks"
         ):
 
-            extracted_text = (
-                "\n\n".join(
-                    record["text"]
-                    for record in document[
-                        "pages"
-                    ]
-                    if record[
-                        "text"
-                    ].strip()
-                )
+            extracted_text = "\n\n".join(
+                record["text"]
+                for record in document["pages"]
+                if record["text"].strip()
             )
 
             st.write(
@@ -1271,9 +999,7 @@ if st.session_state.documents:
 # QUESTION ANSWERING
 # ============================================================
 
-st.subheader(
-    "3. Ask a question"
-)
+st.subheader("3. Ask a question")
 
 question = st.text_input(
     "Question",
@@ -1283,18 +1009,11 @@ question = st.text_input(
 )
 
 
-if st.button(
-    "🔎 Ask"
-):
-
-    # --------------------------------------------------------
-    # VALIDATION
-    # --------------------------------------------------------
+if st.button("🔎 Ask"):
 
     if (
         not st.session_state.chunks
-        or st.session_state.faiss_index
-        is None
+        or st.session_state.faiss_index is None
     ):
 
         st.warning(
@@ -1318,13 +1037,8 @@ if st.button(
 
         model = load_embedding_model()
 
-        # ----------------------------------------------------
-        # HYBRID SEARCH
-        # ----------------------------------------------------
-
-        with st.spinner(
-            "Searching documents..."
-        ):
+        # Search
+        with st.spinner("Searching documents..."):
 
             retrieved = hybrid_search(
                 question,
@@ -1336,16 +1050,11 @@ if st.button(
 
         try:
 
-            # ------------------------------------------------
-            # GROQ
-            # ------------------------------------------------
-
             client = get_groq_client(
-                st.secrets[
-                    "GROQ_API_KEY"
-                ]
+                st.secrets["GROQ_API_KEY"]
             )
 
+            # Generate answer
             with st.spinner(
                 "Generating answer..."
             ):
@@ -1357,43 +1066,24 @@ if st.button(
                     groq_model,
                 )
 
-            # ------------------------------------------------
-            # ANSWER
-            # ------------------------------------------------
+            st.markdown("### 💬 Answer")
 
-            st.markdown(
-                "### 💬 Answer"
-            )
+            st.write(answer)
 
-            st.write(
-                answer
-            )
-
-            # ------------------------------------------------
-            # SOURCES
-            # ------------------------------------------------
-
-            st.markdown(
-                "### 📚 Retrieved sources"
-            )
+            st.markdown("### 📚 Retrieved sources")
 
             for number, result in enumerate(
                 retrieved,
                 start=1,
             ):
 
-                chunk = result[
-                    "chunk"
-                ]
+                chunk = result["chunk"]
 
-                if chunk["page"]:
-
+                if chunk["page"] is not None:
                     page_text = (
                         f"Page {chunk['page']}"
                     )
-
                 else:
-
                     page_text = (
                         "Page not available"
                     )
@@ -1422,4 +1112,3 @@ if st.button(
             st.error(
                 f"Groq request failed: {error}"
             )
-
