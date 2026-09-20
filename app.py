@@ -1,4 +1,4 @@
-```python
+
 import hashlib
 import io
 import re
@@ -1422,4 +1422,4 @@ if st.button(
             st.error(
                 f"Groq request failed: {error}"
             )
-```
+
