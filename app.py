@@ -604,7 +604,7 @@ def load_drive_files(drive_link):
                 url=drive_link,
                 output=str(output_file),
                 quiet=False,
-                fuzzy=True,
+                #fuzzy=True,
             )
 
             if not downloaded_file:
